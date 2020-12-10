@@ -1,0 +1,95 @@
+---
+- name: get RSL status from cisco devices
+  hosts: cisco
+  gather_facts: false
+  connection: network_cli
+  tasks:
+   - ios_facts:
+      gather_subset: all
+   - name: cek RSL
+     ios_command:
+      commands:
+       - show interfaces {{ item }} trans detail
+     with_items: "{{ hostvars[inventory_hostname]['iface'].split(',') }}"
+     register: printrsl
+   - name: get hostname
+     ios_command:
+      commands:
+       - show running-config | incl hostname
+     register: varhostname
+   - name: save output rsl to file
+     copy:
+      content: "{{ printrsl | to_nice_json }}"
+      dest: /home/user/RSL/backup/{{ inventory_hostname }}_rsl.json
+   - name: counting object from json
+     shell: >
+      jq '.results[].stdout_lines | length' /home/user/RSL/backup/{{ inventory_hostname }}_rsl.json | wc -l
+     register: jsondata
+   - name: counting object converting
+     shell: >
+      seq 0 {{ jsondata.stdout|int - 1 }} | tr '\n' ' ' | xargs | sed 's/[[:space:]]/,/g'
+     register: seq
+   - name: extract object array
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_rsl.json | jq .results[{{ item }}].stdout_lines | sed -e 's/\]//g' -e 's/\[//g' > /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed1.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: remove empty line
+     shell: >
+      sed -i -e 's/\[//g' -e 's/\]//g' /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed1.json && sed -i '/^\s*$/d' /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed1.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: get last line value
+     shell: >
+      sed -i -e '$!d' /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed1.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: remove quote and space
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed1.json | tr '"' ' ' | xargs | sed -e 's/[[:space:]]/,/g' > /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed2.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: add IP to file
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed2.json | awk '{ print $0",{{ inventory_hostname }}" }' > /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed3.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: add hostname to file
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed3.json | awk '{ print $0",{{ ansible_net_hostname }}" }' > /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed4.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: get interface description
+     ios_command:
+      commands:
+       - show interfaces {{ item }} description | section 1
+     with_items: "{{ hostvars[inventory_hostname]['iface'].split(',') }}"
+     register: ifacedesc
+   - name: save interface description to file
+     copy:
+      content: "{{ ifacedesc.results[item.0].stdout  }}"
+      dest: /home/user/RSL/backup/{{ inventory_hostname }}_{{ item.1 }}_ifacedesc.json
+     with_indexed_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: get interface description and parse it
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_ifacedesc.json | tr '"' ' ' | xargs | awk '{ print $5 }'
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+     register: description
+   - name: insert interface description
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item.0 }}_rsl_parsed4.json | awk '{ print $0",{{ description.results[item.0].stdout }}" }' > /home/user/RSL/backup/{{ inventory_hostname }}_{{ item.0 }}_rsl_parsed5.json
+     with_indexed_items:
+      - "{{ seq.stdout.split(',') | list }}"
+   - name: get data value
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_{{ item }}_rsl_parsed5.json
+     with_items:
+      - "{{ seq.stdout.split(',') | list }}"
+     register: valuedata
+   - name: post to DB
+     shell: >
+      curl -d "value={{ valuedata.results[item.0].stdout }}" -X POST http://your-web-service/ansible/postrsl -v
+     with_indexed_items:
+      - "{{ seq.stdout.split(',') | list }}"
