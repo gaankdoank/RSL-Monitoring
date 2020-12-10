@@ -1,0 +1,12 @@
+[cisco]
+172.31.111.[2:8]
+172.31.111.[10:16]
+172.31.111.[15:16]
+172.31.111.[19:31]
+172.31.111.222
+
+[cisco:vars]
+ansible_network_os=ios
+ansible_ssh_user=user
+ansible_ssh_pass=password
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
