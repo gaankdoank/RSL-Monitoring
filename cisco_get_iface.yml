@@ -1,0 +1,21 @@
+---
+- name: get interface from cisco devices
+  hosts: cisco
+  gather_facts: false
+  connection: network_cli
+  tasks:
+   - name: show interface desc
+     ios_command:
+      commands:
+       - show interfaces transceiver
+     register: iface
+   - name: save output iface to file
+     copy:
+      content: "{{ iface.stdout_lines | to_nice_json }}"
+      dest: /home/user/RSL/backup/{{ inventory_hostname }}_iface.json
+   - name: remove line
+     shell: >
+      sed -i -e '1d;$d' -e '1,10d' -e 's/\[//g' -e 's/\]//g' -e 's/\"//g' /home/user/RSL/backup/{{ inventory_hostname }}_iface.json
+   - name: get iface interface from file
+     shell: >
+      cat /home/user/RSL/backup/{{ inventory_hostname }}_iface.json | awk '{ print "\""$1"\"" }' | grep "Te\|Gi" | paste -d "," -s | awk '{ print "{{ inventory_hostname }}" " iface=" $1}' >> /home/user/RSL/custom_inventory_file
